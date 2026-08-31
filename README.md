@@ -93,6 +93,8 @@ export AFRFB_BASE_DIR="/storage/emulated/0/receita"
 ```markdown
 ## contabilidade
 
+- obs: nos flashcards, evitar questoes de conta - focar em conceitos e definicoes teoricas
+
 - Aula 05
   - dificuldades: DRE, apuracao do resultado do exercicio, CPC 26
 - Aula 06
@@ -104,8 +106,20 @@ export AFRFB_BASE_DIR="/storage/emulated/0/receita"
 - Aula 03
 ```
 
-As dificuldades sao opcionais e usadas para o modelo priorizar aqueles
-pontos ao montar os flashcards/questoes.
+Dois tipos de anotacao, ambos opcionais:
+
+- `dificuldades:` pontos que o gerador deve **priorizar cobrir** (o modelo
+  garante que pelo menos metade dos flashcards, ou a questao escolhida,
+  toquem nesses pontos).
+- `obs:` (aceita tambem `comentarios:`/`instrucoes:`) **instrucoes livres**
+  que o gerador deve seguir a risca, tipo "evitar questoes de conta, focar
+  nas teoricas" ou "prefira questoes estilo CESPE (certo/errado)".
+
+A indentacao decide o alcance:
+
+- Um item **indentado** sob `- Aula NN` vale so para aquela aula.
+- Um item **sem indentacao**, logo apos o `## materia`, vale para a
+  materia inteira (todas as aulas daquela materia usam essa instrucao).
 
 ## Proximos passos (fora do escopo desta etapa)
 

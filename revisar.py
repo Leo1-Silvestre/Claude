@@ -135,8 +135,34 @@ def extract_text(pdf_path: Path, max_chars: int) -> tuple[str, int, int, bool]:
 # Config semanal (foco-semana.md)
 # --------------------------------------------------------------------------
 
+DIF_KEYS = {"dificuldade", "dificuldades"}
+OBS_KEYS = {
+    "obs", "observacao", "observacoes",
+    "comentario", "comentarios",
+    "instrucao", "instrucoes",
+}
+
+
+def _add_item(destino: dict, chave_raw: str, valor: str) -> None:
+    chave = normalize(chave_raw)
+    if chave in DIF_KEYS:
+        itens = [d.strip() for d in valor.split(",") if d.strip()]
+        destino.setdefault("dificuldades", []).extend(itens)
+    elif chave in OBS_KEYS:
+        # observacoes/instrucoes sao texto livre - nao quebrar por virgula
+        destino.setdefault("obs", []).append(valor.strip())
+
+
 def parse_foco(path: Path) -> dict:
-    """Retorna { materia_normalizada: { aula_num: [dificuldades] } }."""
+    """Retorna { materia_normalizada: {
+        "obs": [...],                                  # observacoes gerais da materia
+        "aulas": { aula_num: {"dificuldades": [...], "obs": [...]} },
+    }}
+
+    Um item nao indentado logo apos "## materia" (ou apos qualquer aula) vale
+    para a materia toda. Um item indentado sob "- Aula NN" vale so para essa
+    aula.
+    """
     foco: dict = {}
     if not path.exists():
         return foco
@@ -147,31 +173,50 @@ def parse_foco(path: Path) -> dict:
         linha = raw.rstrip()
         if not linha.strip():
             continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        conteudo = linha.strip()
 
-        m_materia = re.match(r"^##\s+(.+)", linha)
-        if m_materia:
+        m_materia = re.match(r"^##\s+(.+)", conteudo)
+        if m_materia and indent == 0:
             materia_atual = normalize(m_materia.group(1))
-            foco.setdefault(materia_atual, {})
+            foco.setdefault(materia_atual, {"obs": [], "aulas": {}})
             aula_atual = None
             continue
 
-        m_aula = re.match(r"^-\s*[Aa]ula\s*(\d+)", linha)
-        if m_aula and materia_atual is not None:
+        m_aula = re.match(r"^-\s*[Aa]ula\s*(\d+)", conteudo)
+        if m_aula and indent == 0 and materia_atual is not None:
             aula_atual = int(m_aula.group(1))
-            foco[materia_atual].setdefault(aula_atual, [])
+            foco[materia_atual]["aulas"].setdefault(aula_atual, {"dificuldades": [], "obs": []})
             continue
 
-        m_dif = re.match(r"^\s+-\s*dificuldade[s]?\s*:\s*(.+)", linha, re.IGNORECASE)
-        if m_dif and materia_atual is not None and aula_atual is not None:
-            itens = [d.strip() for d in m_dif.group(1).split(",") if d.strip()]
-            foco[materia_atual][aula_atual].extend(itens)
+        m_item = re.match(r"^-\s*([^:]+):\s*(.+)", conteudo)
+        if m_item and materia_atual is not None:
+            chave_raw, valor = m_item.group(1), m_item.group(2)
+            if indent > 0 and aula_atual is not None:
+                _add_item(foco[materia_atual]["aulas"][aula_atual], chave_raw, valor)
+            else:
+                # item nao indentado: vale para a materia toda
+                _add_item(foco[materia_atual], chave_raw, valor)
             continue
 
     return foco
 
 
 def dificuldades_para(foco: dict, materia: str, aula: int) -> list:
-    return foco.get(normalize(materia), {}).get(aula, [])
+    m = foco.get(normalize(materia))
+    if not m:
+        return []
+    return m.get("aulas", {}).get(aula, {}).get("dificuldades", [])
+
+
+def obs_para(foco: dict, materia: str, aula: int) -> list:
+    """Observacoes/instrucoes gerais da materia + especificas da aula, nessa ordem."""
+    m = foco.get(normalize(materia))
+    if not m:
+        return []
+    gerais = m.get("obs", [])
+    da_aula = m.get("aulas", {}).get(aula, {}).get("obs", [])
+    return gerais + da_aula
 
 
 # --------------------------------------------------------------------------
@@ -188,7 +233,7 @@ prova, e nao em teoria generica de livro-texto. Responda sempre em portugues do 
 em texto simples (sem markdown pesado), pronto para ser lido em um terminal."""
 
 
-def montar_prompt_flashcard(materia, aula, texto_pdf, dificuldades, n):
+def montar_prompt_flashcard(materia, aula, texto_pdf, dificuldades, obs, n):
     partes = [
         f"Materia: {materia}",
         f"Aula: {aula:02d}",
@@ -207,6 +252,12 @@ def montar_prompt_flashcard(materia, aula, texto_pdf, dificuldades, n):
             "- priorize-os, garantindo que pelo menos metade dos flashcards toque "
             "diretamente neles: " + "; ".join(dificuldades)
         )
+    if obs:
+        partes.append(
+            "Instrucoes do candidato para esta sessao - siga-as estritamente, "
+            "mesmo que isso mude a abordagem padrao (ex.: evitar um tipo de "
+            "flashcard, focar em outro angulo): " + "; ".join(obs)
+        )
     partes += [
         "",
         "Formato de saida (repita para cada flashcard, numerado de 1 a "
@@ -222,7 +273,7 @@ def montar_prompt_flashcard(materia, aula, texto_pdf, dificuldades, n):
     return "\n".join(partes)
 
 
-def montar_prompt_questao(materia, aula, texto_pdf, dificuldades, fonte):
+def montar_prompt_questao(materia, aula, texto_pdf, dificuldades, obs, fonte):
     partes = [
         f"Materia: {materia}",
         f"Aula: {aula:02d}",
@@ -259,6 +310,12 @@ def montar_prompt_questao(materia, aula, texto_pdf, dificuldades, fonte):
         partes.append(
             "Se possivel, relacione a questao aos seguintes pontos de dificuldade "
             "indicados pelo candidato para esta aula: " + "; ".join(dificuldades)
+        )
+    if obs:
+        partes.append(
+            "Instrucoes do candidato para esta sessao - siga-as estritamente, "
+            "inclusive na escolha de qual questao usar/elaborar (ex.: evitar um "
+            "tipo de questao, priorizar outro estilo): " + "; ".join(obs)
         )
     partes += [
         "",
@@ -405,13 +462,16 @@ def main(argv=None) -> int:
 
     foco = parse_foco(Path(args.foco))
     dificuldades = dificuldades_para(foco, args.materia, aula)
+    obs = obs_para(foco, args.materia, aula)
     if dificuldades:
         print(f"[info] Dificuldades apontadas em {args.foco}: {'; '.join(dificuldades)}", file=sys.stderr)
+    if obs:
+        print(f"[info] Instrucoes apontadas em {args.foco}: {'; '.join(obs)}", file=sys.stderr)
 
     if args.modo == "flashcard":
-        prompt = montar_prompt_flashcard(args.materia, aula, texto_pdf, dificuldades, args.n)
+        prompt = montar_prompt_flashcard(args.materia, aula, texto_pdf, dificuldades, obs, args.n)
     else:
-        prompt = montar_prompt_questao(args.materia, aula, texto_pdf, dificuldades, args.fonte)
+        prompt = montar_prompt_questao(args.materia, aula, texto_pdf, dificuldades, obs, args.fonte)
 
     resultado = None if args.no_llm else gerar_sessao(prompt, args.model, args.effort)
 
