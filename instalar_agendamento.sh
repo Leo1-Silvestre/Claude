@@ -39,7 +39,7 @@ NOVAS_LINHAS=""
 for HORA in "${HORARIOS[@]}"; do
   HH="${HORA%%:*}"
   MIN="${HORA#*:}"
-  NOVAS_LINHAS+="${MIN} ${HH} * * * cd \"$DIR_PROJETO\" && python3 agendar.py >> \"$DIR_PROJETO/sessoes/cron.log\" 2>&1 $MARCADOR"$'\n'
+  NOVAS_LINHAS+="${MIN} ${HH} * * * mkdir -p \"$DIR_PROJETO/sessoes\" && cd \"$DIR_PROJETO\" && python3 agendar.py >> \"$DIR_PROJETO/sessoes/cron.log\" 2>&1 $MARCADOR"$'\n'
 done
 
 { printf '%s\n' "$CRON_SEM_MARCADOR"; printf '%s' "$NOVAS_LINHAS"; } | crontab -
