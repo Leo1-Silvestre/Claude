@@ -373,6 +373,19 @@ def gerar_sessao(prompt: str, model: str, effort: str) -> str | None:
             file=sys.stderr,
         )
         return None
+    except TypeError as e:
+        # O SDK ainda nao chega a fazer a requisicao e levanta TypeError (em vez
+        # de AuthenticationError) quando nao encontra nenhuma credencial no
+        # ambiente (nem ANTHROPIC_API_KEY, nem perfil 'ant auth login').
+        if "authentication" in str(e).lower() or "api_key" in str(e).lower():
+            print(
+                "[aviso] Credenciais da API da Claude nao configuradas - mostrando "
+                "apenas o texto extraido do PDF. Configure a variavel de ambiente "
+                "ANTHROPIC_API_KEY (ou rode 'ant auth login').",
+                file=sys.stderr,
+            )
+            return None
+        raise
     except anthropic.PermissionDeniedError:
         print("[erro] A chave de API nao tem permissao para este modelo.", file=sys.stderr)
         return None

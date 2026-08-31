@@ -121,8 +121,56 @@ A indentacao decide o alcance:
 - Um item **sem indentacao**, logo apos o `## materia`, vale para a
   materia inteira (todas as aulas daquela materia usam essa instrucao).
 
+## Agendamento automatico (2-3x por dia)
+
+O agendamento roda 100% no seu tablet via `cron` (Termux). O script
+`agendar.py` escolhe sozinho qual aula revisar a cada execucao - ele
+rotaciona pela lista de `- Aula NN` do `foco-semana.md` (round-robin) e
+alterna o modo entre `flashcard` e `questao` a cada chamada. O cron so
+precisa saber os horarios; a logica de "qual aula agora" fica no script.
+
+### Configurar
+
+```bash
+pkg install python cronie   # se ainda nao tiver
+pip install -r requirements.txt
+
+# guarde sua chave num .env local (nao versionado) para o cron conseguir usar:
+echo 'ANTHROPIC_API_KEY=sua-chave-aqui' > .env
+
+./instalar_agendamento.sh                    # padrao: 08:00 13:00 20:00
+# ou horarios customizados:
+./instalar_agendamento.sh 07:30 12:00 21:30
+```
+
+O script instala o `cronie` se faltar, escreve as entradas no seu
+`crontab` (sem apagar outras entradas que voce ja tenha) e inicia o
+`crond`. Rodar de novo com horarios diferentes substitui os anteriores.
+
+Para persistir depois de reiniciar o tablet, instale o app **Termux:Boot**
+e crie `~/.termux/boot/start-crond.sh` com o conteudo `crond` (e
+`chmod +x` nele) - sem isso, o cron para se o Termux for encerrado/o
+aparelho reiniciar e precisa ser reiniciado rodando `crond` de novo.
+
+Para notificacao no aparelho quando cada revisao terminar, instale o
+app **Termux:API** e `pkg install termux-api` - o `agendar.py` detecta e
+usa `termux-notification` automaticamente se disponivel; sem ele, o
+agendamento continua funcionando normalmente, so sem o aviso.
+
+### Onde ficam os resultados
+
+- `sessoes/<data>_<materia>_aulaNN_<modo>.txt` - a integra de cada sessao gerada
+- `.estado_revisao.json` - por onde a rotacao parou (nao mexa a mao, mas pode apagar para recomecar do zero)
+- `sessoes/cron.log` - saida bruta de cada disparo do cron (util para depurar)
+
+### Testar sem esperar o cron
+
+```bash
+python3 agendar.py            # roda a proxima revisao da rotacao agora
+python3 agendar.py --modo flashcard   # forca o modo nesta execucao
+```
+
 ## Proximos passos (fora do escopo desta etapa)
 
-- Agendamento automatico (2-3x por dia)
 - Interface (app/atalhos)
 - Extracao especifica de trechos grifados/marcados (highlights) do PDF
