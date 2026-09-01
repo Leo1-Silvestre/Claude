@@ -100,11 +100,15 @@ def find_aula_pdf(materia_dir: Path, aula: int) -> Path:
         p = materia_dir / nome
         if p.exists():
             return p
-    padrao = re.compile(rf"aula\s*0*{aula}(?!\d)", re.IGNORECASE)
-    for f in sorted(materia_dir.glob("*.pdf")):
+    # arquivos "reais" costumam vir tipo curso-244690-aula-07-...-completo.PDF:
+    # aceita separador (hifen/underscore/espaco) entre "aula" e o numero, e
+    # extensao .pdf ou .PDF (Termux roda em Linux, que diferencia maiusculas)
+    padrao = re.compile(rf"aula[\s\-_]*0*{aula}(?!\d)", re.IGNORECASE)
+    pdfs = sorted(f for f in materia_dir.iterdir() if f.is_file() and f.suffix.lower() == ".pdf")
+    for f in pdfs:
         if padrao.search(f.stem):
             return f
-    disponiveis = sorted(f.name for f in materia_dir.glob("*.pdf"))
+    disponiveis = sorted(f.name for f in pdfs)
     raise FileNotFoundError(
         f"PDF da aula {aula:02d} nao encontrado em {materia_dir}.\n"
         f"Arquivos disponiveis: {disponiveis}"
