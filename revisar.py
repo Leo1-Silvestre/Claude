@@ -7,16 +7,20 @@ Uso:
 
 Le o foco da semana em foco-semana.md, localiza o PDF da aula em
 <base-dir>/<materia>/Aula<NN>.pdf, extrai o texto e gera uma sessao de
-revisao (flashcards ou questao) chamando a API da Claude.
+revisao (flashcards ou questao) usando o Claude Code CLI (`claude -p`),
+autenticado com a assinatura Claude do usuario - sem chave de API paga.
 
-Se a API nao estiver configurada, o script ainda mostra o texto extraido
-do PDF, para validar a etapa de extracao sem gastar chamadas de API.
+Se o CLI nao estiver instalado/logado, o script ainda mostra o texto
+extraido do PDF, para validar a etapa de extracao sem depender dele.
 """
 
 import argparse
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -25,14 +29,9 @@ try:
 except ImportError:
     PdfReader = None
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None
-
 
 MODOS = ("flashcard", "questao")
-DEFAULT_MODEL = os.environ.get("AFRFB_MODEL", "claude-opus-5")
+DEFAULT_MODEL = os.environ.get("AFRFB_MODEL")  # None = usa o modelo padrao configurado no Claude Code
 DEFAULT_FOCO = "foco-semana.md"
 
 
@@ -346,69 +345,82 @@ def montar_prompt_questao(materia, aula, texto_pdf, dificuldades, obs, fonte):
 
 
 # --------------------------------------------------------------------------
-# Chamada a API da Claude
+# Chamada ao Claude Code CLI (usa a assinatura do usuario, nao a API paga)
 # --------------------------------------------------------------------------
 
-def gerar_sessao(prompt: str, model: str, effort: str) -> str | None:
-    """Retorna o texto gerado, ou None se a API nao estiver disponivel/configurada."""
-    if anthropic is None:
+def gerar_sessao(prompt: str, model: str | None, effort: str) -> str | None:
+    """Retorna o texto gerado, ou None se o Claude Code CLI nao estiver disponivel/logado.
+
+    Roda `claude -p` com todas as ferramentas desabilitadas (--tools ""), so
+    para gerar texto - autentica com o login normal da assinatura (Pro/Max),
+    sem precisar de ANTHROPIC_API_KEY.
+    """
+    claude_bin = shutil.which("claude")
+    if claude_bin is None:
+        # cron roda com PATH minimo e pode nao achar o binario mesmo instalado -
+        # tenta o caminho padrao do npm global no Termux como fallback
+        candidato = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr")) / "bin" / "claude"
+        if candidato.exists():
+            claude_bin = str(candidato)
+    if claude_bin is None:
         print(
-            "[aviso] pacote 'anthropic' nao instalado - mostrando apenas o texto "
-            "extraido do PDF. Rode: pip install -r requirements.txt",
+            "[aviso] Claude Code CLI nao encontrado - mostrando apenas o "
+            "texto extraido do PDF. Instale com: npm install -g @anthropic-ai/claude-code",
             file=sys.stderr,
         )
         return None
 
-    try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=model,
-            max_tokens=8000,
-            system=SYSTEM_PROMPT,
-            thinking={"type": "adaptive"},
-            output_config={"effort": effort},
-            messages=[{"role": "user", "content": prompt}],
-        )
-    except anthropic.AuthenticationError:
-        print(
-            "[aviso] Credenciais da API da Claude nao configuradas - mostrando "
-            "apenas o texto extraido do PDF. Configure a variavel de ambiente "
-            "ANTHROPIC_API_KEY (ou rode 'ant auth login').",
-            file=sys.stderr,
-        )
-        return None
-    except TypeError as e:
-        # O SDK ainda nao chega a fazer a requisicao e levanta TypeError (em vez
-        # de AuthenticationError) quando nao encontra nenhuma credencial no
-        # ambiente (nem ANTHROPIC_API_KEY, nem perfil 'ant auth login').
-        if "authentication" in str(e).lower() or "api_key" in str(e).lower():
+    cmd = [
+        claude_bin,
+        "-p",
+        "--system-prompt",
+        SYSTEM_PROMPT,
+        "--tools",
+        "",
+        "--output-format",
+        "text",
+        "--no-session-persistence",
+        "--effort",
+        effort,
+    ]
+    if model:
+        cmd += ["--model", model]
+
+    # roda numa pasta neutra e vazia, pra nao puxar CLAUDE.md/contexto do repo
+    with tempfile.TemporaryDirectory(prefix="revisar-afrfb-") as tmp_cwd:
+        try:
+            resultado = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=tmp_cwd,
+                timeout=300,
+            )
+        except FileNotFoundError:
             print(
-                "[aviso] Credenciais da API da Claude nao configuradas - mostrando "
-                "apenas o texto extraido do PDF. Configure a variavel de ambiente "
-                "ANTHROPIC_API_KEY (ou rode 'ant auth login').",
+                "[aviso] Claude Code CLI nao encontrado - mostrando apenas o "
+                "texto extraido do PDF.",
                 file=sys.stderr,
             )
             return None
-        raise
-    except anthropic.PermissionDeniedError:
-        print("[erro] A chave de API nao tem permissao para este modelo.", file=sys.stderr)
-        return None
-    except anthropic.NotFoundError:
-        print(f"[erro] Modelo invalido: {model}", file=sys.stderr)
-        return None
-    except anthropic.RateLimitError as e:
-        retry_after = e.response.headers.get("retry-after", "?")
-        print(f"[erro] Limite de taxa da API atingido. Tente novamente em {retry_after}s.", file=sys.stderr)
-        return None
-    except anthropic.APIConnectionError:
-        print("[aviso] Sem conexao com a API da Claude - mostrando apenas o texto extraido do PDF.", file=sys.stderr)
-        return None
-    except anthropic.APIStatusError as e:
-        print(f"[erro] Erro na API da Claude ({e.status_code}): {e.message}", file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            print("[erro] Claude Code CLI demorou demais para responder (timeout).", file=sys.stderr)
+            return None
+
+    if resultado.returncode != 0:
+        stderr = resultado.stderr.strip()
+        if "not logged in" in stderr.lower() or "authentication" in stderr.lower() or "login" in stderr.lower():
+            print(
+                "[aviso] Claude Code nao esta logado - mostrando apenas o texto "
+                "extraido do PDF. Rode 'claude' uma vez e faca login com sua conta.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"[erro] Claude Code CLI falhou (codigo {resultado.returncode}): {stderr}", file=sys.stderr)
         return None
 
-    textos = [b.text for b in response.content if b.type == "text"]
-    return "\n".join(textos).strip()
+    return resultado.stdout.strip()
 
 
 # --------------------------------------------------------------------------
@@ -433,10 +445,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Para --modo questao: de onde tirar a questao (padrao: auto)",
     )
-    p.add_argument("--model", default=DEFAULT_MODEL, help=f"Modelo da API da Claude (padrao: {DEFAULT_MODEL})")
+    p.add_argument("--model", default=DEFAULT_MODEL, help="Modelo do Claude Code a usar (padrao: o configurado na sua conta, ex: sonnet, opus)")
     p.add_argument("--effort", default="medium", choices=("low", "medium", "high", "xhigh", "max"), help="Esforco de raciocinio do modelo (padrao: medium)")
     p.add_argument("--max-chars", type=int, default=120000, help="Limite de caracteres de texto extraido enviado ao modelo")
-    p.add_argument("--no-llm", action="store_true", help="Nao chama a API - so extrai e mostra o texto do PDF")
+    p.add_argument("--no-llm", action="store_true", help="Nao chama o Claude Code - so extrai e mostra o texto do PDF")
     return p
 
 

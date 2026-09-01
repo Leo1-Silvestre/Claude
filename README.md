@@ -41,16 +41,19 @@ automatico e interface.
 pip install -r requirements.txt
 ```
 
-Para gerar as sessoes com IA (recomendado), configure sua chave da API da
-Claude:
+Para gerar as sessoes com IA, o script usa o **Claude Code CLI** (`claude -p`)
+autenticado com sua assinatura Claude (Pro/Max) - nao precisa de chave de
+API paga separada:
 
 ```bash
-export ANTHROPIC_API_KEY="sua-chave-aqui"
+pkg install nodejs          # se ainda nao tiver
+npm install -g @anthropic-ai/claude-code
+claude                      # roda uma vez, so pra fazer login com sua conta
 ```
 
-Sem chave configurada (ou com `--no-llm`), o script ainda funciona: mostra
-o texto extraido do PDF e o prompt que seria enviado, o que ja e util para
-validar se a extracao do PDF esta boa.
+Sem o CLI instalado/logado (ou com `--no-llm`), o script ainda funciona:
+mostra o texto extraido do PDF e o prompt que seria enviado, o que ja e
+util para validar se a extracao do PDF esta boa.
 
 ## Onde o script procura os PDFs
 
@@ -83,10 +86,10 @@ export AFRFB_BASE_DIR="/storage/emulated/0/receita"
 | `--base-dir` | Pasta `receita` com as materias |
 | `--n` | Quantos flashcards gerar (padrao: 10) |
 | `--fonte` | Para `--modo questao`: `material` (so reaproveita questao comentada do PDF), `nova` (sempre elabora questao inedita) ou `auto` (deixa o modelo escolher) |
-| `--model` | Modelo da API da Claude (padrao: `claude-opus-5`) |
+| `--model` | Modelo do Claude Code (padrao: o configurado na sua conta; aceita alias tipo `sonnet`, `opus`) |
 | `--effort` | Esforco de raciocinio: `low`, `medium` (padrao), `high`, `xhigh`, `max` |
 | `--max-chars` | Limite de caracteres do PDF enviados ao modelo (padrao: 120000) |
-| `--no-llm` | So extrai e mostra o texto do PDF, sem chamar a API |
+| `--no-llm` | So extrai e mostra o texto do PDF, sem chamar o Claude Code |
 
 ## Formato do foco-semana.md
 
@@ -132,11 +135,13 @@ precisa saber os horarios; a logica de "qual aula agora" fica no script.
 ### Configurar
 
 ```bash
-pkg install python cronie   # se ainda nao tiver
+pkg install python cronie nodejs   # se ainda nao tiver
 pip install -r requirements.txt
+npm install -g @anthropic-ai/claude-code
+claude   # roda uma vez, so pra fazer login com sua conta Claude
 
-# guarde sua chave num .env local (nao versionado) para o cron conseguir usar:
-echo 'ANTHROPIC_API_KEY=sua-chave-aqui' > .env
+# opcional: se sua pasta "receita" nao for detectada automaticamente, aponte pra ela num .env local:
+echo 'AFRFB_BASE_DIR=/storage/emulated/0/Receita' > .env
 
 ./instalar_agendamento.sh                    # padrao: 08:00 13:00 20:00
 # ou horarios customizados:

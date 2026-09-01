@@ -39,7 +39,7 @@ def carregar_env() -> None:
     """Le .env (KEY=VALUE por linha) se existir, sem sobrescrever env ja definido.
 
     Cron roda com ambiente minimo - isso evita ter que colocar
-    ANTHROPIC_API_KEY etc. dentro do crontab.
+    AFRFB_BASE_DIR etc. dentro do crontab.
     """
     if not ENV_PATH.exists():
         return
